@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "npx --yes pnpm@10.4.1 install --frozen-lockfile --store-dir .pnpm-store --network-concurrency=1",
+  "buildCommand": "npx --yes pnpm@10.4.1 check && npx --yes pnpm@10.4.1 test && npx --yes pnpm@10.4.1 build",
+  "outputDirectory": "dist/public",
+  "functions": {
+    "api/trpc/[...trpc].ts": {
+      "maxDuration": 60
+    }
+  },
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
+}
