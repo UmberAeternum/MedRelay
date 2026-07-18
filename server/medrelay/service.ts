@@ -14,16 +14,43 @@ export type ModelProvider = {
 export type ProviderMode = "live" | "offline" | "deterministic";
 
 const appointment = { requested: false, reason: null, recommendedSpecialty: null, confirmationRequired: true as const, booked: false as const };
-const noEvidenceReply = (message: string, safety: SafetyResult): ConversationReply => ({
-  message, followUpQuestion: null, informationGaps: ["More patient-provided details are needed."],
+const noEvidenceReply = (
+  message: string,
+  safety: SafetyResult,
+  messages: PatientMessage[] = [],
+  followUpQuestion: string | null = null,
+  informationGaps: string[] = []
+): ConversationReply => ({
+  message, followUpQuestion, informationGaps,
   careLevel: safety.careLevel, careRationale: "Deterministic patient-only safety screening result.",
   warningSigns: safety.warningSigns, emergencyGuidance: safety.emergencyGuidance,
-  appointmentHandoff: appointment, evidence: safety.evidence,
+  appointmentHandoff: appointment, evidence: [...safety.evidence, ...latestDirectEvidence(messages)],
   clinicianReviewRequired: true, limitations: LIMITATION,
 });
 
 function latestDirectEvidence(messages: PatientMessage[]) {
-  return messages.map(message => ({ sourceMessageId: message.id, quote: message.content.slice(0, 500), kind: "direct" as const, requiresConfirmation: false, targetField: "summary" as const }));
+  return messages.map(message => ({ sourceMessageId: message.id, quote: message.content.slice(0, 500), kind: "direct" as const, requiresConfirmation: false, targetField: "reportedSymptoms" as const }));
+}
+
+function deterministicGaps(messages: PatientMessage[]) {
+  const text = messages.map(message => message.content).join(" ");
+  const gaps: string[] = [];
+  if (!/(?:today|yesterday|morning|evening|night|since|started|began|day|week|month|कल|आज|सुबह|से|नిన్న|ఈరోజు|నుంచి|రోజు|వారం)/i.test(text)) gaps.push("Onset and duration");
+  if (!/(?:where|location|left|right|upper|lower|back|chest|stomach|head|pain in|कहाँ|दर्द|पेट|सीने|सिर|ఎక్కడ|నొప్పి|కడుపు|తల)/i.test(text)) gaps.push("Location or affected area");
+  if (!/(?:mild|moderate|severe|intense|scale|out of 10|हल्का|तेज|तीव्र|दर्द कितना|తీవ్ర|తక్కువ|10లో)/i.test(text)) gaps.push("Severity and change over time");
+  if (!/(?:history|condition|surgery|pregnan|diabet|asthma|medical|इतिहास|बीमारी|ऑपरेशन|गर्भ|చరిత్ర|వ్యాధి|శస్త్ర)/i.test(text)) gaps.push("Relevant health history");
+  if (!/(?:medication|medicine|drug|tablet|allerg|दवा|एलर्जी| మందు|అలెర్జీ)/i.test(text)) gaps.push("Current medicines and allergies");
+  return gaps.slice(0, 5);
+}
+
+function deterministicQuestion(gaps: string[]) {
+  const first = gaps[0];
+  if (first === "Onset and duration") return "When did this begin, and has it changed since it started?";
+  if (first === "Location or affected area") return "Where do you feel it, and does it move anywhere else?";
+  if (first === "Severity and change over time") return "How severe is it right now, and is it getting better or worse?";
+  if (first === "Relevant health history") return "Is there any relevant health history or recent event a clinician should know about?";
+  if (first === "Current medicines and allergies") return "What medicines or allergies should be included in the clinician-review draft?";
+  return null;
 }
 
 function offlineHandoff(messages: PatientMessage[], safety: SafetyResult): ClinicianHandoff {
@@ -34,7 +61,7 @@ function offlineHandoff(messages: PatientMessage[], safety: SafetyResult): Clini
     title: "Clinician-review symptom-intake draft",
     summary: currentStatements.length ? `Patient-reported statements: ${currentStatements.join(" | ")}` : "No patient statement provided.",
     reportedSymptoms: currentStatements, timeline: null, relevantHistory: [], reportedMedications: [], reportedAllergies: [],
-    informationGaps: ["Timeline", "Relevant history", "Current medications", "Allergies"],
+    informationGaps: deterministicGaps(messages),
     warningSigns: safety.warningSigns, careLevel: safety.careLevel,
     careRationale: "Deterministic patient-only safety screening; clinical interpretation is still required.",
     emergencyGuidance: safety.emergencyGuidance,
@@ -71,12 +98,13 @@ export class MedRelayService {
     let providerMode: ProviderMode = "deterministic";
 
     if (safety.careLevel === "emergency_services") {
-      reply = noEvidenceReply(safety.emergencyGuidance!, safety);
+      reply = noEvidenceReply(safety.emergencyGuidance!, safety, patients, null, []);
     } else if (containsPromptInjection(patients.map(m => m.content))) {
-      reply = noEvidenceReply("I can only help capture patient-reported information for a clinician-review draft. Please describe the health concern in your own words.", safety);
+      reply = noEvidenceReply("I can only help capture patient-reported information for a clinician-review draft. Please describe the health concern in your own words.", safety, patients, "What symptom or concern would you like to record?", ["A patient-authored symptom statement"]);
     } else if (!this.provider.configured) {
       providerMode = "offline";
-      reply = noEvidenceReply("AI generation is unavailable. Your statement was saved ephemerally; add details or create a deterministic draft.", safety);
+      const gaps = deterministicGaps(patients);
+      reply = noEvidenceReply("AI generation is unavailable. I captured your statement ephemerally and can only collect neutral details for clinician review.", safety, patients, deterministicQuestion(gaps), gaps);
     } else {
       const parsed = ConversationReplySchema.parse(await this.provider.reply(patients, safety));
       if (!isSemanticallySafe([JSON.stringify(parsed)])) throw new Error("UNSAFE_MODEL_OUTPUT");

@@ -7,11 +7,11 @@ It is not a diagnostic, prescribing, treatment, booking, clinician-review, or em
 ## Run
 
 ```bash
-corepack pnpm install --frozen-lockfile
-corepack pnpm check
-corepack pnpm test
-corepack pnpm build
-corepack pnpm dev
+npx --yes pnpm@10.4.1 install --frozen-lockfile
+npx --yes pnpm@10.4.1 check
+npx --yes pnpm@10.4.1 test
+npx --yes pnpm@10.4.1 build
+npx --yes pnpm@10.4.1 dev
 ```
 
 Open `/medrelay`. Without `OPENAI_API_KEY`, the UI honestly uses a deterministic offline draft. A live badge appears only after a successful validated provider response.

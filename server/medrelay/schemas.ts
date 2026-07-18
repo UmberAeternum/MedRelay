@@ -99,6 +99,21 @@ const emergencyConsistency = (
   }
 };
 
+function conversationConsistency(
+  value: { careLevel: z.infer<typeof CareLevelSchema>; followUpQuestion: string | null; informationGaps: string[] },
+  ctx: z.RefinementCtx
+) {
+  if (value.careLevel === "emergency_services" && value.followUpQuestion) {
+    ctx.addIssue({ code: "custom", message: "Emergency guidance must not be replaced by a follow-up question." });
+  }
+  if (value.careLevel === "collect_more_information" && (!value.followUpQuestion || value.informationGaps.length === 0)) {
+    ctx.addIssue({ code: "custom", message: "Collect-more-information replies need one focused question and an information gap." });
+  }
+  if (value.informationGaps.length > 0 && !value.followUpQuestion && value.careLevel !== "emergency_services") {
+    ctx.addIssue({ code: "custom", message: "Information gaps must be paired with a focused question." });
+  }
+}
+
 export const ConversationReplyModelSchema = z
   .object({
     message: z.string().trim().min(1).max(2_000),
@@ -118,6 +133,7 @@ export const ConversationReplyModelSchema = z
 export const ConversationReplySchema = ConversationReplyModelSchema.superRefine(
   (value, ctx) => {
     emergencyConsistency(value, ctx);
+    conversationConsistency(value, ctx);
     const handoff = AppointmentHandoffSchema.safeParse(value.appointmentHandoff);
     if (!handoff.success) {
       ctx.addIssue({ code: "custom", message: "Appointment handoff is inconsistent." });
@@ -162,4 +178,3 @@ export type CareLevel = z.infer<typeof CareLevelSchema>;
 export type EvidenceReference = z.infer<typeof EvidenceReferenceSchema>;
 export type ConversationReply = z.infer<typeof ConversationReplySchema>;
 export type ClinicianHandoff = z.infer<typeof ClinicianHandoffSchema>;
-
