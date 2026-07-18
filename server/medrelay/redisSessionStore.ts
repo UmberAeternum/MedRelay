@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import type { AssistantMessage, ConversationSession, PatientMessage, SessionStore } from "./sessionStore";
+import type { AssistantMessage, ConversationSession, PatientMessage, SessionStore } from "./sessionStore.js";
 
 type StoredSession = Omit<ConversationSession, "tokenHash"> & { tokenHash: string };
 

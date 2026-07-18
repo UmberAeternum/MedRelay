@@ -1,26 +1,49 @@
 import express from "express";
-import type { NextFunction, Request, Response } from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { appRouter } from "../routers";
-import { createContext } from "./context";
+import { appRouter } from "../routers.js";
+import { createContext } from "./context.js";
+
+type GuardRequest = {
+  method: string;
+  headers: Record<string, unknown>;
+};
+
+type GuardResponse = {
+  status(code: number): {
+    json(body: unknown): void;
+  };
+};
+
+type GuardNext = () => void;
 
 export function createApiApp() {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ limit: "100kb", extended: false }));
-  app.use("/api/trpc", (req: Request, res: Response, next: NextFunction) => {
+  const sameOriginGuard: express.RequestHandler = (
+    req: GuardRequest,
+    res: GuardResponse,
+    next: GuardNext,
+  ) => {
     if (req.method === "GET") return next();
     const origin = req.headers.origin;
-    if (!origin) return next();
+    if (typeof origin !== "string" || origin.length === 0) return next();
     try {
-      const host = req.headers["x-forwarded-host"] || req.headers.host;
-      if (new URL(origin).host !== host) return res.status(403).json({ error: "Origin rejected" });
+      const forwardedHost = req.headers["x-forwarded-host"];
+      const requestHost = req.headers.host;
+      const host = typeof forwardedHost === "string" ? forwardedHost : requestHost;
+      if (new URL(origin).host !== host) {
+        res.status(403).json({ error: "Origin rejected" });
+        return;
+      }
     } catch {
-      return res.status(403).json({ error: "Origin rejected" });
+      res.status(403).json({ error: "Origin rejected" });
+      return;
     }
     next();
-  });
+  };
+  app.use("/api/trpc", sameOriginGuard);
   app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
   return app;
 }

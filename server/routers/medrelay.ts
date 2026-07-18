@@ -1,11 +1,11 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { OpenAIMedRelayProvider } from "../_core/openai";
-import { publicProcedure, router } from "../_core/trpc";
-import { FixedWindowRateLimiter, RedisFixedWindowRateLimiter } from "../medrelay/rateLimit";
-import { MedRelayService } from "../medrelay/service";
-import { DemoSessionStore } from "../medrelay/sessionStore";
-import { RedisDemoSessionStore } from "../medrelay/redisSessionStore";
+import { OpenAIMedRelayProvider } from "../_core/openai.js";
+import { publicProcedure, router } from "../_core/trpc.js";
+import { FixedWindowRateLimiter, RedisFixedWindowRateLimiter } from "../medrelay/rateLimit.js";
+import { MedRelayService } from "../medrelay/service.js";
+import { DemoSessionStore } from "../medrelay/sessionStore.js";
+import { RedisDemoSessionStore } from "../medrelay/redisSessionStore.js";
 
 const sessionStore = RedisDemoSessionStore.fromEnv() ?? new DemoSessionStore();
 if (process.env.VERCEL && sessionStore.kind !== "upstash-redis") {

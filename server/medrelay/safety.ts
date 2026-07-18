@@ -1,5 +1,5 @@
-import type { CareLevel, EvidenceReference } from "./schemas";
-import type { PatientMessage, TrustedMessage } from "./sessionStore";
+import type { CareLevel, EvidenceReference } from "./schemas.js";
+import type { PatientMessage, TrustedMessage } from "./sessionStore.js";
 
 export type SafetyResult = {
   careLevel: CareLevel;

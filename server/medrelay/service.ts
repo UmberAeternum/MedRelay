@@ -1,8 +1,8 @@
-import { ClinicianHandoffSchema, ConversationReplySchema, LIMITATION, type ClinicianHandoff, type ConversationReply } from "./schemas";
-import { containsPromptInjection, screenPatientSafety, type SafetyResult } from "./safety";
-import { requireValidEvidence } from "./evidence";
-import { isSemanticallySafe } from "./semanticValidation";
-import type { ConversationSession, PatientMessage, SessionStore } from "./sessionStore";
+import { ClinicianHandoffSchema, ConversationReplySchema, LIMITATION, type ClinicianHandoff, type ConversationReply } from "./schemas.js";
+import { containsPromptInjection, screenPatientSafety, type SafetyResult } from "./safety.js";
+import { requireValidEvidence } from "./evidence.js";
+import { isSemanticallySafe } from "./semanticValidation.js";
+import type { ConversationSession, PatientMessage, SessionStore } from "./sessionStore.js";
 
 export type ModelProvider = {
   configured: boolean;

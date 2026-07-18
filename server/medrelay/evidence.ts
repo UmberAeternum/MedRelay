@@ -1,5 +1,5 @@
-import type { EvidenceReference } from "./schemas";
-import type { PatientMessage } from "./sessionStore";
+import type { EvidenceReference } from "./schemas.js";
+import type { PatientMessage } from "./sessionStore.js";
 
 const normalize = (value: string) => value.normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
 

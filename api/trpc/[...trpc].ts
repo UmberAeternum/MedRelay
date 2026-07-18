@@ -1,4 +1,7 @@
-import { createApiApp } from "../../server/_core/app";
+// Keep the explicit .js suffix for Vercel's Node ESM runtime. The function
+// compiler emits this TypeScript dependency as JavaScript and Node does not
+// resolve extensionless relative imports at runtime.
+import { createApiApp } from "../../server/_core/app.js";
 
 export const maxDuration = 60;
 
