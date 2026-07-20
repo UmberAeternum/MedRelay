@@ -13,6 +13,16 @@ export type ModelProvider = {
 
 export type ProviderMode = "live" | "offline" | "deterministic";
 
+function logProviderFallback(operation: "reply" | "handoff", error: unknown) {
+  const candidate = error as { status?: unknown; code?: unknown };
+  console.warn("[medrelay] using offline fallback", {
+    operation,
+    status: typeof candidate.status === "number" ? candidate.status : "unknown",
+    code: typeof candidate.code === "string" ? candidate.code.slice(0, 64) : "unknown",
+    errorType: error instanceof Error ? error.name : "unknown",
+  });
+}
+
 const appointment = { requested: false, reason: null, recommendedSpecialty: null, confirmationRequired: true as const, booked: false as const };
 const noEvidenceReply = (
   message: string,
@@ -106,13 +116,20 @@ export class MedRelayService {
       const gaps = deterministicGaps(patients);
       reply = noEvidenceReply("AI generation is unavailable. I captured your statement ephemerally and can only collect neutral details for clinician review.", safety, patients, deterministicQuestion(gaps), gaps);
     } else {
-      const parsed = ConversationReplySchema.parse(await this.provider.reply(patients, safety));
-      if (!isSemanticallySafe([JSON.stringify(parsed)])) throw new Error("UNSAFE_MODEL_OUTPUT");
-      requireValidEvidence(parsed.evidence, patients);
-      if (safety.careLevel === "urgent_clinician_review" && parsed.careLevel === "routine_clinician_review") throw new Error("URGENCY_DOWNGRADE");
-      reply = { ...parsed, careLevel: safety.careLevel === "urgent_clinician_review" ? safety.careLevel : parsed.careLevel,
-        warningSigns: [...new Set([...safety.warningSigns, ...parsed.warningSigns])], evidence: [...safety.evidence, ...parsed.evidence] };
-      providerMode = "live";
+      try {
+        const parsed = ConversationReplySchema.parse(await this.provider.reply(patients, safety));
+        if (!isSemanticallySafe([JSON.stringify(parsed)])) throw new Error("UNSAFE_MODEL_OUTPUT");
+        requireValidEvidence(parsed.evidence, patients);
+        if (safety.careLevel === "urgent_clinician_review" && parsed.careLevel === "routine_clinician_review") throw new Error("URGENCY_DOWNGRADE");
+        reply = { ...parsed, careLevel: safety.careLevel === "urgent_clinician_review" ? safety.careLevel : parsed.careLevel,
+          warningSigns: [...new Set([...safety.warningSigns, ...parsed.warningSigns])], evidence: [...safety.evidence, ...parsed.evidence] };
+        providerMode = "live";
+      } catch (error) {
+        logProviderFallback("reply", error);
+        const gaps = deterministicGaps(patients);
+        reply = noEvidenceReply("AI generation is temporarily unavailable. I captured your statement ephemerally and can only collect neutral details for clinician review.", safety, patients, deterministicQuestion(gaps), gaps);
+        providerMode = "offline";
+      }
     }
     const assistant = this.sessions.appendAssistant(session, reply.message);
     await this.sessions.save(session);
@@ -131,13 +148,19 @@ export class MedRelayService {
       draft = offlineHandoff(patients, safety);
       providerMode = safety.careLevel === "emergency_services" ? "deterministic" : "offline";
     } else {
-      draft = ClinicianHandoffSchema.parse(await this.provider.handoff(patients, safety));
-      if (!isSemanticallySafe([JSON.stringify(draft)])) throw new Error("UNSAFE_MODEL_OUTPUT");
-      requireValidEvidence(draft.evidence, patients);
-      if (safety.careLevel === "urgent_clinician_review" && draft.careLevel === "routine_clinician_review") throw new Error("URGENCY_DOWNGRADE");
-      draft = { ...draft, careLevel: safety.careLevel === "routine_clinician_review" ? draft.careLevel : safety.careLevel,
-        warningSigns: [...new Set([...safety.warningSigns, ...draft.warningSigns])], evidence: [...safety.evidence, ...draft.evidence] };
-      providerMode = "live";
+      try {
+        draft = ClinicianHandoffSchema.parse(await this.provider.handoff(patients, safety));
+        if (!isSemanticallySafe([JSON.stringify(draft)])) throw new Error("UNSAFE_MODEL_OUTPUT");
+        requireValidEvidence(draft.evidence, patients);
+        if (safety.careLevel === "urgent_clinician_review" && draft.careLevel === "routine_clinician_review") throw new Error("URGENCY_DOWNGRADE");
+        draft = { ...draft, careLevel: safety.careLevel === "routine_clinician_review" ? draft.careLevel : safety.careLevel,
+          warningSigns: [...new Set([...safety.warningSigns, ...draft.warningSigns])], evidence: [...safety.evidence, ...draft.evidence] };
+        providerMode = "live";
+      } catch (error) {
+        logProviderFallback("handoff", error);
+        draft = offlineHandoff(patients, safety);
+        providerMode = "offline";
+      }
     }
     requireValidEvidence(draft.evidence, patients);
     return { draft, safety, providerMode, transcript: patients,

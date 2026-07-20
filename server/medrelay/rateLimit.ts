@@ -47,15 +47,28 @@ export class RedisFixedWindowRateLimiter implements RateLimiter {
       "local ttl = redis.call('TTL', KEYS[1])",
       "if count <= tonumber(ARGV[1]) then return {1, ttl} else return {0, ttl} end",
     ].join("\n");
-    const response = await fetch(this.url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(["EVAL", script, "1", `medrelay:rate:${key}`, this.limit, this.windowSeconds]),
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!response.ok) throw new Error("RATE_LIMIT_UNAVAILABLE");
-    const payload = await response.json() as { result?: [number, number]; error?: string };
-    if (payload.error || !payload.result) throw new Error("RATE_LIMIT_UNAVAILABLE");
-    return { allowed: payload.result[0] === 1, retryAfterSeconds: Math.max(1, payload.result[1]) };
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(this.url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(["EVAL", script, "1", `medrelay:rate:${key}`, this.limit, this.windowSeconds]),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!response.ok) {
+        console.warn("[medrelay] upstash rate-limit response", { status: response.status, elapsedMs: Date.now() - startedAt });
+        throw new Error("RATE_LIMIT_UNAVAILABLE");
+      }
+      const payload = await response.json() as { result?: [number, number]; error?: string };
+      if (payload.error || !payload.result) {
+        console.warn("[medrelay] upstash rate-limit error", { status: response.status, elapsedMs: Date.now() - startedAt });
+        throw new Error("RATE_LIMIT_UNAVAILABLE");
+      }
+      return { allowed: payload.result[0] === 1, retryAfterSeconds: Math.max(1, payload.result[1]) };
+    } catch (error) {
+      if (error instanceof Error && error.message === "RATE_LIMIT_UNAVAILABLE") throw error;
+      console.warn("[medrelay] upstash rate-limit request failed", { errorType: error instanceof Error ? error.name : "unknown", elapsedMs: Date.now() - startedAt });
+      throw new Error("RATE_LIMIT_UNAVAILABLE");
+    }
   }
 }

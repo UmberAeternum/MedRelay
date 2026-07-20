@@ -27,7 +27,9 @@ export class OpenAIMedRelayProvider implements ModelProvider {
   readonly model = process.env.OPENAI_MEDICAL_MODEL?.trim() || "gpt-5.6";
   readonly configured = Boolean(process.env.OPENAI_API_KEY?.trim());
   private readonly secret = this.configured ? salt() : null;
-  private readonly client = this.configured ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+  // A single retry can multiply a user action into several paid requests. Any
+  // transient failure is handled by the service's deterministic offline path.
+  private readonly client = this.configured ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 10_000 }) : null;
 
   private identifier(messages: PatientMessage[]) {
     const seed = messages[0]?.id ?? "empty";
@@ -37,23 +39,44 @@ export class OpenAIMedRelayProvider implements ModelProvider {
 
   async reply(messages: PatientMessage[], safety: SafetyResult) {
     if (!this.client) throw new Error("MODEL_UNAVAILABLE");
-    const response = await this.client.responses.parse({
+    return this.parseResponse("reply", () => this.client!.responses.parse({
       model: this.model, store: false, safety_identifier: this.identifier(messages), reasoning: { effort: "medium" },
       input: [...trustedInput(messages), { role: "developer", content: `Deterministic safety result (must not be downgraded): ${JSON.stringify(safety)}` }],
       text: { format: zodTextFormat(ConversationReplyModelSchema, "medrelay_conversation_reply") },
-    });
-    if (!response.output_parsed) throw new Error("INVALID_MODEL_RESPONSE");
-    return response.output_parsed;
+    }));
   }
 
   async handoff(messages: PatientMessage[], safety: SafetyResult) {
     if (!this.client) throw new Error("MODEL_UNAVAILABLE");
-    const response = await this.client.responses.parse({
+    return this.parseResponse("handoff", () => this.client!.responses.parse({
       model: this.model, store: false, safety_identifier: this.identifier(messages), reasoning: { effort: "medium" },
       input: [...trustedInput(messages), { role: "developer", content: `Create the structured clinician-review draft. Deterministic safety result (must not be downgraded): ${JSON.stringify(safety)}` }],
       text: { format: zodTextFormat(ClinicianHandoffModelSchema, "medrelay_clinician_handoff") },
-    });
-    if (!response.output_parsed) throw new Error("INVALID_MODEL_RESPONSE");
-    return response.output_parsed;
+    }));
+  }
+
+  private async parseResponse<T extends { output_parsed: unknown; status?: unknown }>(operation: "reply" | "handoff", request: () => Promise<T>) {
+    const startedAt = Date.now();
+    try {
+      const response = await request();
+      console.info("[medrelay] openai response", {
+        operation,
+        status: typeof response.status === "number" ? response.status : "unknown",
+        parsed: Boolean(response.output_parsed),
+        elapsedMs: Date.now() - startedAt,
+      });
+      if (!response.output_parsed) throw new Error("INVALID_MODEL_RESPONSE");
+      return response.output_parsed;
+    } catch (error) {
+      const candidate = error as { status?: unknown; code?: unknown };
+      console.warn("[medrelay] openai request failed", {
+        operation,
+        status: typeof candidate.status === "number" ? candidate.status : "unknown",
+        code: typeof candidate.code === "string" ? candidate.code.slice(0, 64) : "unknown",
+        errorType: error instanceof Error ? error.name : "unknown",
+        elapsedMs: Date.now() - startedAt,
+      });
+      throw error;
+    }
   }
 }

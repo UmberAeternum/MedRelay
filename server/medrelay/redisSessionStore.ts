@@ -23,16 +23,29 @@ export class RedisDemoSessionStore implements SessionStore {
   private key(id: string) { return `medrelay:demo:${id}`; }
 
   private async command<T>(command: unknown[]): Promise<T> {
-    const response = await fetch(this.url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(command),
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!response.ok) throw new Error("SESSION_STORE_UNAVAILABLE");
-    const payload = await response.json() as { result?: T; error?: string };
-    if (payload.error) throw new Error("SESSION_STORE_UNAVAILABLE");
-    return payload.result as T;
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(this.url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(command),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!response.ok) {
+        console.warn("[medrelay] upstash session-store response", { status: response.status, elapsedMs: Date.now() - startedAt });
+        throw new Error("SESSION_STORE_UNAVAILABLE");
+      }
+      const payload = await response.json() as { result?: T; error?: string };
+      if (payload.error) {
+        console.warn("[medrelay] upstash session-store error", { status: response.status, elapsedMs: Date.now() - startedAt });
+        throw new Error("SESSION_STORE_UNAVAILABLE");
+      }
+      return payload.result as T;
+    } catch (error) {
+      if (error instanceof Error && error.message === "SESSION_STORE_UNAVAILABLE") throw error;
+      console.warn("[medrelay] upstash session-store request failed", { errorType: error instanceof Error ? error.name : "unknown", elapsedMs: Date.now() - startedAt });
+      throw new Error("SESSION_STORE_UNAVAILABLE");
+    }
   }
 
   private serialize(session: ConversationSession): string {
