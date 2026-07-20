@@ -40,6 +40,11 @@ export class RedisDemoSessionStore implements SessionStore {
         console.warn("[medrelay] upstash session-store error", { status: response.status, elapsedMs: Date.now() - startedAt });
         throw new Error("SESSION_STORE_UNAVAILABLE");
       }
+      console.info("[medrelay] upstash session-store response", {
+        command: typeof command[0] === "string" ? command[0] : "unknown",
+        status: response.status,
+        elapsedMs: Date.now() - startedAt,
+      });
       return payload.result as T;
     } catch (error) {
       if (error instanceof Error && error.message === "SESSION_STORE_UNAVAILABLE") throw error;

@@ -64,6 +64,7 @@ export class RedisFixedWindowRateLimiter implements RateLimiter {
         console.warn("[medrelay] upstash rate-limit error", { status: response.status, elapsedMs: Date.now() - startedAt });
         throw new Error("RATE_LIMIT_UNAVAILABLE");
       }
+      console.info("[medrelay] upstash rate-limit response", { status: response.status, elapsedMs: Date.now() - startedAt });
       return { allowed: payload.result[0] === 1, retryAfterSeconds: Math.max(1, payload.result[1]) };
     } catch (error) {
       if (error instanceof Error && error.message === "RATE_LIMIT_UNAVAILABLE") throw error;
