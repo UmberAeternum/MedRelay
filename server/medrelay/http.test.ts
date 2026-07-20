@@ -1,12 +1,29 @@
 import http from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApiApp } from "../_core/app";
+import { FixedWindowRateLimiter } from "./rateLimit";
+import type { ModelProvider } from "./service";
+import { DemoSessionStore } from "./sessionStore";
 
 type TrpcEnvelope = { json?: unknown };
 type JsonRecord = Record<string, unknown>;
 
 let server: http.Server;
 let baseUrl = "";
+let providerCalls = 0;
+
+const offlineProvider: ModelProvider = {
+  configured: false,
+  model: "test-offline",
+  async reply() {
+    providerCalls += 1;
+    throw new Error("TEST_PROVIDER_MUST_NOT_BE_CALLED");
+  },
+  async handoff() {
+    providerCalls += 1;
+    throw new Error("TEST_PROVIDER_MUST_NOT_BE_CALLED");
+  },
+};
 
 async function callMutation(path: string, input: unknown): Promise<{ response: Response; body: unknown }> {
   const response = await fetch(`${baseUrl}/api/trpc/${path}`, {
@@ -29,7 +46,11 @@ function resultData(body: unknown): JsonRecord {
 }
 
 beforeAll(async () => {
-  server = http.createServer(createApiApp());
+  const sessionStore = new DemoSessionStore();
+  const limiter = new FixedWindowRateLimiter(100, 60_000);
+  server = http.createServer(createApiApp({
+    medrelay: { sessionStore, provider: offlineProvider, limiter },
+  }));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("HTTP smoke server did not bind");
@@ -63,6 +84,7 @@ describe("Vercel-shaped tRPC HTTP surface", () => {
     expect(resultData(continuation.body)).toMatchObject({
       patientMessage: { content: "Synthetic cough and fever since yesterday." },
     });
+    expect(providerCalls).toBe(0);
   });
 
   it("returns deterministic emergency guidance without a GPT provider response", async () => {
@@ -85,5 +107,6 @@ describe("Vercel-shaped tRPC HTTP surface", () => {
     expect(Array.isArray(warningSigns)).toBe(true);
     expect((warningSigns as unknown[]).length).toBeGreaterThan(0);
     expect(data).not.toHaveProperty("diagnosis");
+    expect(providerCalls).toBe(0);
   });
 });

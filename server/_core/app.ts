@@ -1,6 +1,6 @@
 import express from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { appRouter } from "../routers.js";
+import { appRouter, createAppRouter, type AppRouter, type MedRelayRouterDependencies } from "../routers.js";
 import { createContext } from "./context.js";
 
 type GuardRequest = {
@@ -16,8 +16,14 @@ type GuardResponse = {
 
 type GuardNext = () => void;
 
-export function createApiApp() {
+export type ApiAppOptions = {
+  router?: AppRouter;
+  medrelay?: MedRelayRouterDependencies;
+};
+
+export function createApiApp(options: ApiAppOptions = {}) {
   const app = express();
+  const trpcRouter = options.router ?? (options.medrelay ? createAppRouter(options.medrelay) : appRouter);
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ limit: "100kb", extended: false }));
@@ -44,6 +50,6 @@ export function createApiApp() {
     next();
   };
   app.use("/api/trpc", sameOriginGuard);
-  app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
+  app.use("/api/trpc", createExpressMiddleware({ router: trpcRouter, createContext }));
   return app;
 }
