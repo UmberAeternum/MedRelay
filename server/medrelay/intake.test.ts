@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
 import { LIMITATION } from "./schemas";
 import { MedRelayService, type ModelProvider } from "./service";
 import { DemoSessionStore } from "./sessionStore";
+import { dedupeEvidence } from "./evidence";
+import { deterministicIntake } from "./deterministicIntake";
+import { OpenAIMedRelayProvider } from "../_core/openai";
 
 const provider: ModelProvider = { configured: false, model: "gpt-5.6", reply: vi.fn(), handoff: vi.fn() };
 const examples = [
@@ -49,5 +53,84 @@ describe("broad deterministic symptom intake", () => {
     expect(handoff.draft.reportedSymptoms).toEqual(["Correction: it started Tuesday"]);
     expect(handoff.transcript).toHaveLength(2);
     expect(handoff.draft.evidence.map(item => item.sourceMessageId)).toHaveLength(2);
+  });
+
+  it.each([
+    ["respiratory", "I have fever and cough"],
+    ["digestive", "My stomach hurts and I feel nauseated"],
+    ["urinary", "It burns when I urinate"],
+    ["skin", "I have an itchy rash"],
+    ["neurological", "I feel dizzy when I stand"],
+    ["injury", "I twisted my ankle and it hurts"],
+    ["general", "I feel unwell and tired"],
+  ] as const)("uses the %s category state machine", (category, text) => {
+    const message = { id: randomUUID(), role: "patient" as const, content: text, createdAt: new Date().toISOString() };
+    expect(deterministicIntake([message]).category).toBe(category);
+  });
+
+  it("asks respiratory questions in order and never asks a pain-location question", async () => {
+    const { service, session } = await startService();
+    const first = await service.continue(session.conversationId, session.accessToken, "test-owner", "I have fever and cough");
+    expect(first.reply.followUpQuestion).toContain("When did");
+    expect(first.reply.followUpQuestion).not.toMatch(/where.*feel|move anywhere/i);
+    const second = await service.continue(session.conversationId, session.accessToken, "test-owner", "It began yesterday");
+    expect(second.reply.followUpQuestion).toContain("How severe");
+    expect(second.reply.followUpQuestion).not.toMatch(/where.*feel|move anywhere/i);
+    expect(second.reply.informationGaps).toContain("Measured temperature");
+  });
+
+  it("does not repeat a previously asked question when an answer is still incomplete", async () => {
+    const { service, session } = await startService();
+    const first = await service.continue(session.conversationId, session.accessToken, "test-owner", "I have a cough");
+    const second = await service.continue(session.conversationId, session.accessToken, "test-owner", "I am not sure");
+    expect(second.reply.followUpQuestion).not.toBe(first.reply.followUpQuestion);
+  });
+
+  it("preserves negations as patient wording without creating a warning sign", async () => {
+    const { service, session } = await startService();
+    const result = await service.continue(session.conversationId, session.accessToken, "test-owner", "I have a cough but no trouble breathing and no chest pain");
+    expect(result.safety.careLevel).toBe("routine_clinician_review");
+    const handoff = await service.handoff(session.conversationId, session.accessToken, "test-owner");
+    expect(handoff.draft.reportedSymptoms[0]).toContain("no trouble breathing");
+  });
+
+  it("keeps emergency screening ahead of category intake and provider calls", async () => {
+    const called = vi.fn();
+    const service = new MedRelayService(new DemoSessionStore(), { configured: true, model: "gpt-5.6", reply: called, handoff: called });
+    const session = await service.start("test-owner");
+    const result = await service.continue(session.conversationId, session.accessToken, "test-owner", "I have severe trouble breathing");
+    expect(result.providerMode).toBe("deterministic");
+    expect(result.safety.careLevel).toBe("emergency_services");
+    expect(called).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates evidence references while retaining distinct correction messages", () => {
+    const evidence = [{ sourceMessageId: "00000000-0000-4000-8000-000000000001", quote: "Cough", kind: "direct" as const, requiresConfirmation: false, targetField: "reportedSymptoms" as const }, { sourceMessageId: "00000000-0000-4000-8000-000000000001", quote: " cough ", kind: "direct" as const, requiresConfirmation: false, targetField: "reportedSymptoms" as const }, { sourceMessageId: "00000000-0000-4000-8000-000000000002", quote: "Correction: cough", kind: "direct" as const, requiresConfirmation: false, targetField: "reportedSymptoms" as const }];
+    expect(dedupeEvidence(evidence)).toHaveLength(2);
+  });
+
+  it.each([
+    "Morning nunchi jvaram and daggu undi",
+    "मुझे कल से पेट में परेशानी और मितली है",
+    "నిన్నటి నుంచి జ్వరం మరియు దగ్గు ఉంది",
+    "Morning nunchi headache undi and mujhe chakkar aa rahe hain",
+  ])("accepts multilingual or mixed-language patient wording: %s", async text => {
+    const { service, session } = await startService();
+    const result = await service.continue(session.conversationId, session.accessToken, "test-owner", text);
+    expect(result.providerMode).toBe("offline");
+    expect(result.reply.followUpQuestion).toBeTruthy();
+    expect(result.reply.limitations).toBe(LIMITATION);
+  });
+
+  it("keeps the external provider disabled in the zero-cost mode and restores environment state", async () => {
+    vi.stubEnv("MEDRELAY_LIVE_PROVIDER", "false");
+    vi.stubEnv("OPENAI_API_KEY", "synthetic-test-value");
+    try {
+      const model = new OpenAIMedRelayProvider();
+      expect(model.configured).toBe(false);
+      await expect(model.reply([], { careLevel: "collect_more_information", warningSigns: [], emergencyGuidance: null, evidence: [], checkedAt: new Date().toISOString(), policyVersion: "2026-07-17" })).rejects.toThrow("MODEL_UNAVAILABLE");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

@@ -23,3 +23,14 @@ export function requireValidEvidence(evidence: EvidenceReference[], messages: Pa
   const issues = validateEvidence(evidence, messages);
   if (issues.length) throw new Error("INVALID_EVIDENCE");
 }
+
+/** Remove duplicate references without touching the patient transcript or correction audit. */
+export function dedupeEvidence(evidence: EvidenceReference[]): EvidenceReference[] {
+  const seen = new Set<string>();
+  return evidence.filter(item => {
+    const key = [item.sourceMessageId, item.targetField, item.kind, normalize(item.quote)].join("\u0000");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}

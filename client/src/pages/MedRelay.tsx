@@ -11,10 +11,12 @@ import type {
 import { Check, Clipboard, Mic, RotateCcw, Send, ShieldAlert } from "lucide-react";
 import {
   type KeyboardEvent,
+  type RefObject,
   memo,
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { Link } from "wouter";
@@ -68,10 +70,10 @@ const listFields: Array<[keyof Draft, string]> = [
 ];
 
 function providerLabel(mode: "live" | "offline" | "deterministic" | null, configured: boolean | undefined) {
-  if (mode === "live") return "Provider: live structured response";
+  if (mode === "live") return "Provider: validated live response";
   if (mode === "deterministic") return "Provider: deterministic safety response";
-  if (mode === "offline") return "Provider: offline deterministic intake";
-  return configured ? "Provider configured; waiting for a response" : "Provider unavailable; deterministic intake ready";
+  if (mode === "offline") return "Zero-cost offline safety engine — no external AI call";
+  return configured ? "Optional live provider configured — explicit opt-in only" : "Zero-cost offline safety engine — no external AI call";
 }
 
 export default function MedRelay() {
@@ -88,6 +90,7 @@ export default function MedRelay() {
   const [notice, setNotice] = useState("");
   const [composerResetKey, setComposerResetKey] = useState(0);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
   const busy = start.isPending || send.isPending || handoff.isPending || resetMutation.isPending;
 
   const ensureSession = useCallback(async () => {
@@ -145,6 +148,9 @@ export default function MedRelay() {
     if (!highlightedMessageId) return;
     document.getElementById(`patient-${highlightedMessageId}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [highlightedMessageId]);
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [turns.length]);
   const statusText = useMemo(() => providerLabel(mode, status.data?.configured), [mode, status.data?.configured]);
 
   return (
@@ -165,9 +171,9 @@ export default function MedRelay() {
         <div className="grid gap-5 lg:grid-cols-[.85fr_1.15fr]">
           <section className="rounded-2xl border border-white/10 bg-white/[.04] p-4 sm:p-5">
             <h1 className="text-2xl font-semibold">Capture the patient story</h1>
-            <p className="mt-2 text-sm text-slate-400">Select a clearly labelled synthetic scenario or type any English, Hindi, Telugu, or mixed-language statement.</p>
+            <p className="mt-2 text-sm text-slate-400">Select a clearly labelled synthetic scenario or type any English, Hindi, Telugu, or mixed-language statement. The zero-cost engine creates an editable clinician-review draft.</p>
             <ScenarioPicker scenarios={scenarios} disabled={busy} onSelect={submit} />
-            <Transcript turns={turns} highlightedMessageId={highlightedMessageId} onEvidenceSelect={highlightEvidence} />
+            <Transcript turns={turns} highlightedMessageId={highlightedMessageId} onEvidenceSelect={highlightEvidence} endRef={transcriptEndRef} />
             <PatientComposer busy={busy} onSubmit={submit} onNotice={onNotice} resetKey={composerResetKey} />
             {notice && <p role="status" className="mt-3 rounded-lg bg-amber-300/10 p-3 text-sm text-amber-100">{notice}</p>}
           </section>
@@ -188,8 +194,8 @@ const ScenarioPicker = memo(function ScenarioPicker({ scenarios: items, disabled
   return <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">{items.map(scenario => <button key={scenario.label} type="button" disabled={disabled} onClick={() => void onSelect(scenario.text)} className="min-h-14 rounded-xl border border-cyan-300/25 px-3 py-2 text-left text-xs text-cyan-100 transition hover:bg-cyan-300/10 disabled:opacity-50"><span className="block font-semibold">{scenario.label}</span><span className="mt-1 block text-[10px] text-slate-500">Synthetic - {scenario.category}</span></button>)}</div>;
 });
 
-const Transcript = memo(function Transcript({ turns, highlightedMessageId, onEvidenceSelect }: { turns: Turn[]; highlightedMessageId: string | null; onEvidenceSelect: (messageId: string) => void }) {
-  return <div aria-live="polite" className="mt-5 max-h-[32rem] space-y-4 overflow-auto">{turns.length === 0 && <div className="rounded-xl border border-dashed border-white/15 p-6 text-center text-sm text-slate-500">No conversation yet. Samples are labelled synthetic data and arbitrary typed input is supported.</div>}{turns.map(turn => <TurnView key={turn.patient.id} turn={turn} highlightedMessageId={highlightedMessageId} onEvidenceSelect={onEvidenceSelect} />)}</div>;
+const Transcript = memo(function Transcript({ turns, highlightedMessageId, onEvidenceSelect, endRef }: { turns: Turn[]; highlightedMessageId: string | null; onEvidenceSelect: (messageId: string) => void; endRef: RefObject<HTMLDivElement | null> }) {
+  return <div aria-live="polite" className="mt-5 space-y-4">{turns.length === 0 && <div className="rounded-xl border border-dashed border-white/15 p-6 text-center text-sm text-slate-500">No conversation yet. Samples are labelled synthetic data and arbitrary typed input is supported.</div>}{turns.map(turn => <TurnView key={turn.patient.id} turn={turn} highlightedMessageId={highlightedMessageId} onEvidenceSelect={onEvidenceSelect} />)}<div ref={endRef} aria-hidden="true" /></div>;
 });
 
 const TurnView = memo(function TurnView({ turn, highlightedMessageId, onEvidenceSelect }: { turn: Turn; highlightedMessageId: string | null; onEvidenceSelect: (messageId: string) => void }) {
@@ -229,7 +235,7 @@ const PatientComposer = memo(function PatientComposer({ busy, onSubmit, onNotice
 });
 
 const HandoffPanel = memo(function HandoffPanel({ draft, state, busy, onCreate, onReset, onSave, onNotice, onEvidenceSelect }: { draft: Draft | null; state: { storyCaptured: boolean; safetyChecked: boolean; evidenceVerified: boolean; handoffReady: boolean }; busy: boolean; onCreate: () => Promise<void>; onReset: () => Promise<void>; onSave: (draft: Draft) => void; onNotice: (message: string) => void; onEvidenceSelect: (messageId: string) => void }) {
-  return <section className="rounded-2xl border border-white/10 bg-[var(--med-surface)] p-4 sm:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-semibold">Clinician-review handoff</h2><p className="text-sm text-slate-400">Editable, evidence-linked, never automatically sent.</p></div><button type="button" onClick={() => void onReset()} disabled={busy} className="rounded-lg border border-white/15 p-2" aria-label="Reset demo"><RotateCcw size={17} /></button></div>{!draft ? <div className="mt-8 rounded-xl border border-dashed border-white/15 p-8 text-center"><ShieldAlert className="mx-auto text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Validated handoff fields will appear here.</p><button type="button" onClick={() => void onCreate()} disabled={busy || !state.storyCaptured} className="mt-4 rounded-xl bg-white px-4 py-2 font-semibold text-slate-950 disabled:opacity-40">Create handoff</button></div> : <DraftEditor draft={draft} onSave={onSave} onNotice={onNotice} onEvidenceSelect={onEvidenceSelect} />}</section>;
+  return <section className="rounded-2xl border border-white/10 bg-[var(--med-surface)] p-4 sm:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-semibold">Clinician-review handoff</h2><p className="text-sm text-slate-400">Editable, evidence-linked, never automatically sent.</p></div><button type="button" onClick={() => void onReset()} disabled={busy} className="rounded-lg border border-white/15 p-2" aria-label="Reset demo"><RotateCcw size={17} /></button></div>{!draft ? <div className="mt-8 rounded-xl border border-dashed border-white/15 p-8 text-center"><ShieldAlert className="mx-auto text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Validated handoff fields will appear here.</p><button data-testid="create-handoff" type="button" onClick={() => void onCreate()} disabled={busy || !state.storyCaptured} className="mt-4 w-full rounded-xl bg-cyan-300 px-4 py-3 font-semibold text-slate-950 disabled:opacity-40">Create handoff</button></div> : <DraftEditor draft={draft} onSave={onSave} onNotice={onNotice} onEvidenceSelect={onEvidenceSelect} />}</section>;
 });
 
 const DraftEditor = memo(function DraftEditor({ draft, onSave, onNotice, onEvidenceSelect }: { draft: Draft; onSave: (draft: Draft) => void; onNotice: (message: string) => void; onEvidenceSelect: (messageId: string) => void }) {

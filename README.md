@@ -14,7 +14,9 @@ npx --yes pnpm@10.4.1 build
 npx --yes pnpm@10.4.1 dev
 ```
 
-Open `/medrelay`. The public demo is configured for ₹0 mode by default: `MEDRELAY_LIVE_PROVIDER=false` keeps responses deterministic and offline, even if a stale key exists. Live GPT-5.6 requires explicit opt-in plus authorized quota, and the UI shows the live-provider label only after a validated response. Never call deterministic output GPT-5.6.
+Open `/medrelay`. The public demo is a zero-cost deterministic intake engine: `MEDRELAY_LIVE_PROVIDER=false` is the default and prevents external AI/provider calls, even if a stale key exists. It performs deterministic emergency screening, category-aware multilingual follow-up, ephemeral sessions, evidence validation, and an editable clinician-review draft. It never diagnoses, prescribes, books care, claims clinician review, or dispatches emergency services.
+
+The optional OpenAI Responses API integration is server-only and requires authorized quota plus explicit `MEDRELAY_LIVE_PROVIDER=true`. Live inference is not enabled or claimed in the public demo. A deterministic response must never be described as GPT-5.6 output, and `OPENAI_API_KEY` must never be exposed to the browser.
 
 Submission wording: MedRelay is a zero-cost safety-focused demo with validated deterministic fallback behavior. GPT-5.6 integration is implemented but live inference is disabled because no API quota is available.
 

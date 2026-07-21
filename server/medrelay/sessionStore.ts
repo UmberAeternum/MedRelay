@@ -4,11 +4,16 @@ export type PatientMessage = { id: string; role: "patient"; content: string; cre
 export type AssistantMessage = { id: string; role: "assistant"; content: string; createdAt: string };
 export type TrustedMessage = PatientMessage | AssistantMessage;
 
+export type IntakeCategory = "respiratory" | "digestive" | "urinary" | "skin" | "neurological" | "injury" | "general";
+export type IntakeState = { category: IntakeCategory; askedFields: string[] };
+
 export type ConversationSession = {
   id: string;
   ownerKey: string;
   tokenHash: Buffer;
   messages: TrustedMessage[];
+  /** Server-owned deterministic intake state; never accepted from the client. */
+  intake: IntakeState;
   createdAt: number;
   expiresAt: number;
 };
@@ -46,6 +51,7 @@ export class DemoSessionStore {
     const now = this.now();
     const session: ConversationSession = {
       id: randomUUID(), ownerKey, tokenHash: digest(accessToken), messages: [],
+      intake: { category: "general", askedFields: [] },
       createdAt: now, expiresAt: now + this.ttlMs,
     };
     this.sessions.set(session.id, session);

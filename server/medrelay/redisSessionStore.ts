@@ -67,6 +67,7 @@ export class RedisDemoSessionStore implements SessionStore {
     const now = Date.now();
     const session: ConversationSession = {
       id: randomUUID(), ownerKey, tokenHash: digest(accessToken), messages: [],
+      intake: { category: "general", askedFields: [] },
       createdAt: now, expiresAt: now + this.ttlSeconds * 1_000,
     };
     await this.save(session);
