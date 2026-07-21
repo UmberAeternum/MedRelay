@@ -37,9 +37,11 @@ export function classifyCategory(messages: PatientMessage[]): IntakeCategory {
 }
 
 const onset = (text: string) => any(text, [
-  /\b(?:today|yesterday|tomorrow|morning|evening|night|since|started|start|began|begin|for \d+\s*(?:hour|day|week|month)s?)\b/i,
-  /\b(?:kal|aaj|subah|raat|se|shuru|din|hafte|mahine)\b/i,
-  /\b(?:ninna|nēnu|nundi|modal|roj|roju|vāram|varam)\b/i,
+  /\b(?:today|yesterday|tomorrow|morning|evening|night|since|started|start|began|begin|for \d+\s*(?:hour|day|week|month)s?|two days?|a couple of days?|couple of days?|few days?|one week|a week|one month|a month)\b/i,
+  /\b(?:kal|aaj|subah|raat|se|shuru|din|hafte|mahine|do din|kuch din|ek hafte|ek saptah)\b/i,
+  /\b(?:ninna|nēnu|nundi|modal|roj|roju|vāram|varam|rendu rojulu|konni rojulu|oka varam|oka nela)\b/i,
+  /(?:दो दिन|कुछ दिन|एक सप्ताह|एक हफ्ते|कुछ हफ्ते|दो सप्ताह|कल से)/u,
+  /(?:రెండు రోజులు|కొన్ని రోజులు|ఒక వారం|కొన్ని వారాలు|నిన్నటి నుంచి)/u,
 ]);
 const severity = (text: string) => any(text, [
   /\b(?:mild|moderate|severe|intense|worst|scale|out of 10|pain level|better|worse|improv|increas|decreas)\b/i,
@@ -127,6 +129,66 @@ export function deterministicIntake(messages: PatientMessage[], state?: IntakeSt
     answeredFields: [...new Set(answeredFields)],
   };
 }
+
+export function answeredFieldIds(category: IntakeCategory, text: string): string[] {
+  return fields[category].filter(item => item.answered(text)).map(item => item.id);
+}
+
+export function hasSupportedIntakeContent(text: string): boolean {
+  return /\b(?:fever|cough|cold|flu|breath(?:ing)?|stomach|abdominal|belly|nausea|vomit|diarrh|urine|urinate|pee|rash|itch|skin|dizz|headache|migraine|weak|pain|hurt|injur|fall|cut|bruise|symptom|unwell|sick|tired|concern|problem)\b/i.test(text)
+    || /\b(?:jvar|jwar|daggu|khansi|bukhar|saans|pet|ulti|matli|dast|peshab|mutra|khujli|chakkar|sir dard|kamzori|dard|chot)\b/i.test(text)
+    || /(?:జ్వరం|దగ్గు|కడుపు|వాంతి|మూత్రం|దురద|తలతిరుగు|తలనొప్పి|నొప్పి|గాయం|बीुखार|खाँसी|पेट|उल्टी|पेशाब|खुजली|चक्कर|सिरदर्द|दर्द|चोट)/u.test(text);
+}
+
+function durationPhrase(text: string): string | null {
+  const match = text.match(/\b(?:for\s+)?(?:two|a couple of|couple of|few|one|a)\s+(?:hours?|days?|weeks?|months?)\b/i)
+    ?? text.match(/\b(?:since\s+)?(?:yesterday|today|last night|this morning)\b/i)
+    ?? text.match(/\b(?:do din|kuch din|ek hafte|kal se|rendu rojulu|konni rojulu|oka varam|ninna(?:ti)? nundi)\b/i)
+    ?? text.match(/(?:दो दिन|कुछ दिन|एक सप्ताह|एक हफ्ते|कल से|రెండు రోజులు|కొన్ని రోజులు|ఒక వారం|నిన్నటి నుంచి)/u);
+  return match?.[0]?.replace(/\s+/g, " ").trim() ?? null;
+}
+
+function durationDescriptor(value: string): string {
+  const clean = value.replace(/^for\s+/i, "").trim();
+  return /^(?:since\s+)?(?:today|yesterday|last night|this morning|kal|aaj|ninna)/i.test(clean) ? `since ${clean.replace(/^since\s+/i, "")}` : `lasting ${clean}`;
+}
+
+function symptomPhrase(text: string): string | null {
+  const match = text.match(/\b(?:fever|cough|cold|flu|headache|dizziness|stomach pain|stomach discomfort|nausea|vomiting|rash|urinary symptoms?|pain|injury)\b/i)
+    ?? text.match(/\b(?:jvar|jwar|daggu|bukhar|khansi|chakkar|sir dard|pet|dard|chot)\b/i)
+    ?? text.match(/(?:జ్వరం|దగ్గు|తలనొప్పి|కడుపు|నొప్పి|గాయం|बुखार|खाँसी|सिरदर्द|पेट|दर्द|चोट)/u);
+  return match?.[0] ?? null;
+}
+
+function explicitNegation(text: string, phrase: RegExp): boolean {
+  const match = phrase.exec(text);
+  if (!match || match.index === undefined) return false;
+  const before = text.slice(Math.max(0, match.index - 48), match.index);
+  const after = text.slice(match.index + match[0].length, match.index + match[0].length + 80);
+  return /\b(?:no|not|without|denied|deny|nahi|nahin)\b|नहीं|लेदु/u.test(before) || /\b(?:denied|absent)\b/i.test(after);
+}
+
+export function deterministicAcknowledgement(category: IntakeCategory, text: string, newlyAnswered: string[], isCorrection = false): string {
+  const duration = durationPhrase(text);
+  const symptom = symptomPhrase(text);
+  const breathingDenied = explicitNegation(text, /(?:trouble\s+)?breathing|breathing\s+difficulty|shortness\s+of\s+breath/i);
+  const chestDenied = explicitNegation(text, /chest\s+(?:discomfort|pain)/i);
+  const temperature = text.match(/\b\d{2}(?:\.\d)?\s*(?:°|degrees?)?\s*[cf]\b/i)?.[0]?.replace(/\s+/g, " ").trim();
+  if (category === "respiratory" && breathingDenied && chestDenied) {
+    return temperature ? `Recorded: temperature ${temperature}; breathing difficulty and chest discomfort denied.` : "Recorded: breathing difficulty and chest discomfort denied.";
+  }
+  if (newlyAnswered.includes("onset") && symptom && duration) return `Recorded: ${symptom.toLocaleLowerCase()} ${durationDescriptor(duration).toLocaleLowerCase()}.`;
+  if (newlyAnswered.includes("temperature")) {
+    return `Recorded: ${temperature ?? "measured temperature"}.`;
+  }
+  if (newlyAnswered.length > 0 || isCorrection) {
+    const labels = newlyAnswered.length ? newlyAnswered.map(id => ({ severity: "severity and change", temperature: "temperature", breathing: "breathing status", chest: "chest discomfort status", hydration: "hydration", history: "relevant history", location: "affected area", urinaryPattern: "urination pattern", urineChanges: "urine changes", feverFlank: "fever or side/back discomfort", intake: "eating and drinking", bowel: "bowel or vomiting changes", appearance: "appearance and spread", sensation: "sensation", exposure: "recent exposure", triggers: "triggers and function", associated: "associated changes", function: "function", skin: "skin or bleeding", onset: "onset and duration" } as Record<string, string>)[id] ?? id).join(", ") : "the corrected patient statement";
+    return `Recorded: ${labels}.`;
+  }
+  return "That information is already recorded. Please answer the focused question below.";
+}
+
+export const UNMAPPED_MESSAGE = "I could not map that statement to a supported intake field. Please describe the symptom, when it began, or how it has changed.";
 
 export function rememberQuestion(state: IntakeState, intake: DeterministicIntake): IntakeState {
   if (!intake.nextField || state.askedFields.includes(intake.nextField)) return { ...state, category: intake.category };

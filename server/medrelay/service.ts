@@ -2,7 +2,7 @@ import { ClinicianHandoffSchema, ConversationReplySchema, LIMITATION, type Clini
 import { containsPromptInjection, screenPatientSafety, type SafetyResult } from "./safety.js";
 import { dedupeEvidence, requireValidEvidence } from "./evidence.js";
 import { isSemanticallySafe } from "./semanticValidation.js";
-import { currentPatientStatements, deterministicIntake, rememberQuestion } from "./deterministicIntake.js";
+import { UNMAPPED_MESSAGE, answeredFieldIds, currentPatientStatements, deterministicAcknowledgement, deterministicIntake, hasSupportedIntakeContent, rememberQuestion } from "./deterministicIntake.js";
 import type { ConversationSession, PatientMessage, SessionStore } from "./sessionStore.js";
 
 export type ModelProvider = {
@@ -25,6 +25,7 @@ function logProviderFallback(operation: "reply" | "handoff", error: unknown) {
 }
 
 const appointment = { requested: false, reason: null, recommendedSpecialty: null, confirmationRequired: true as const, booked: false as const };
+const INTRO_MESSAGE = "MedRelay captured your statement and prepared an editable clinician-review draft. Continue with the focused follow-up below.";
 const noEvidenceReply = (
   message: string,
   safety: SafetyResult,
@@ -50,6 +51,19 @@ function offlineIntakeReply(session: ConversationSession, messages: PatientMessa
     reply: noEvidenceReply(message, safety, messages, intake.followUpQuestion, intake.informationGaps),
     nextState,
   };
+}
+
+function deterministicResponseMessage(session: ConversationSession, previousPatients: PatientMessage[], patients: PatientMessage[]): string {
+  const latest = patients.at(-1)?.content ?? "";
+  if (patients.length === 1) return INTRO_MESSAGE;
+  const previous = deterministicIntake(previousPatients, session.intake);
+  const current = deterministicIntake(patients, session.intake);
+  const latestFields = answeredFieldIds(current.category, latest);
+  const newlyAnswered = latestFields.filter(field => !previous.answeredFields.includes(field));
+  const isCorrection = /^(?:actually|correction:|i meant|असल में|निजानिकि|నిజానికి)/i.test(latest.trim());
+  if (!newlyAnswered.length && !isCorrection && !hasSupportedIntakeContent(latest)) return UNMAPPED_MESSAGE;
+  if (!newlyAnswered.length && !isCorrection && latestFields.length) return deterministicAcknowledgement(current.category, latest, [], false);
+  return deterministicAcknowledgement(current.category, patients.map(message => message.content).join(" "), newlyAnswered, isCorrection);
 }
 
 function offlineHandoff(messages: PatientMessage[], safety: SafetyResult, session?: ConversationSession): ClinicianHandoff {
@@ -90,6 +104,7 @@ export class MedRelayService {
 
   async continue(id: string, token: string, ownerKey: string, content: string) {
     const session = await this.requireSession(id, token, ownerKey);
+    const previousPatients = session.messages.filter((m): m is PatientMessage => m.role === "patient");
     const patient = this.sessions.appendPatient(session, content);
     await this.sessions.save(session);
     const patients = session.messages.filter((m): m is PatientMessage => m.role === "patient");
@@ -103,7 +118,7 @@ export class MedRelayService {
       reply = noEvidenceReply("I can only help capture patient-reported information for a clinician-review draft. Please describe the health concern in your own words.", safety, patients, "What symptom or concern would you like to record?", ["A patient-authored symptom statement"]);
     } else if (!this.provider.configured) {
       providerMode = "offline";
-      const intakeReply = offlineIntakeReply(session, patients, safety, "MedRelay captured your statement and prepared an editable clinician-review draft. Continue with the focused follow-up below.");
+      const intakeReply = offlineIntakeReply(session, patients, safety, deterministicResponseMessage(session, previousPatients, patients));
       session.intake = intakeReply.nextState;
       reply = intakeReply.reply;
     } else {
@@ -117,7 +132,7 @@ export class MedRelayService {
         providerMode = "live";
       } catch (error) {
         logProviderFallback("reply", error);
-        const intakeReply = offlineIntakeReply(session, patients, safety, "MedRelay captured your statement and prepared an editable clinician-review draft. Continue with the focused follow-up below.");
+        const intakeReply = offlineIntakeReply(session, patients, safety, deterministicResponseMessage(session, previousPatients, patients));
         session.intake = intakeReply.nextState;
         reply = intakeReply.reply;
         providerMode = "offline";

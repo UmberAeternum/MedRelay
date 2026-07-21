@@ -4,7 +4,7 @@ import { LIMITATION } from "./schemas";
 import { MedRelayService, type ModelProvider } from "./service";
 import { DemoSessionStore } from "./sessionStore";
 import { dedupeEvidence } from "./evidence";
-import { deterministicIntake } from "./deterministicIntake";
+import { deterministicIntake, UNMAPPED_MESSAGE } from "./deterministicIntake";
 import { OpenAIMedRelayProvider } from "../_core/openai";
 
 const provider: ModelProvider = { configured: false, model: "gpt-5.6", reply: vi.fn(), handoff: vi.fn() };
@@ -132,5 +132,61 @@ describe("broad deterministic symptom intake", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("gives a first-turn introduction, then different fact acknowledgements and questions", async () => {
+    const { service, session } = await startService();
+    const first = await service.continue(session.conversationId, session.accessToken, "test-owner", "I have fever and cough");
+    const second = await service.continue(session.conversationId, session.accessToken, "test-owner", "fever for a couple of days");
+    const third = await service.continue(session.conversationId, session.accessToken, "test-owner", "moderate");
+    expect(first.reply.message).toBe("MedRelay captured your statement and prepared an editable clinician-review draft. Continue with the focused follow-up below.");
+    expect(second.reply.message).toBe("Recorded: fever lasting a couple of days.");
+    expect(third.reply.message).toBe("Recorded: severity and change.");
+    expect(new Set([first.reply.message, second.reply.message, third.reply.message]).size).toBe(3);
+    expect(second.reply.informationGaps).not.toContain("Onset and duration");
+    expect(second.reply.followUpQuestion).not.toBe(first.reply.followUpQuestion);
+    expect(third.reply.followUpQuestion).not.toBe(second.reply.followUpQuestion);
+  });
+
+  it("recognizes repeated information and repeats only the next focused question", async () => {
+    const { service, session } = await startService();
+    await service.continue(session.conversationId, session.accessToken, "test-owner", "fever for a couple of days");
+    const repeated = await service.continue(session.conversationId, session.accessToken, "test-owner", "fever for a couple of days");
+    expect(repeated.reply.message).toBe("That information is already recorded. Please answer the focused question below.");
+    expect(repeated.reply.followUpQuestion).toContain("If you measured your temperature");
+  });
+
+  it("handles unrelated text without inventing a field or fact", async () => {
+    const { service, session } = await startService();
+    await service.continue(session.conversationId, session.accessToken, "test-owner", "I have fever and cough");
+    const result = await service.continue(session.conversationId, session.accessToken, "test-owner", "The blue train is late");
+    expect(result.reply.message).toBe(UNMAPPED_MESSAGE);
+    expect(result.reply.followUpQuestion).toContain("How severe");
+    expect(result.reply.evidence.at(-1)?.quote).toContain("The blue train is late");
+  });
+
+  it("acknowledges negative respiratory answers without turning them positive", async () => {
+    const { service, session } = await startService();
+    await service.continue(session.conversationId, session.accessToken, "test-owner", "fever and cough");
+    const result = await service.continue(session.conversationId, session.accessToken, "test-owner", "temperature 38°C; breathing difficulty and chest discomfort denied");
+    expect(result.reply.message).toBe("Recorded: temperature 38°C; breathing difficulty and chest discomfort denied.");
+    expect(result.safety.warningSigns).toEqual([]);
+    expect(result.reply.informationGaps).not.toContain("Breathing");
+    expect(result.reply.informationGaps).not.toContain("Chest discomfort");
+  });
+
+  it.each([
+    "fever for two days",
+    "fever for a couple of days",
+    "fever for few days",
+    "fever since yesterday",
+    "fever for one week",
+    "बुखार दो दिन से है",
+    "ज्वर कुछ दिन से है",
+    "జ్వరం రెండు రోజులు ఉంది",
+    "jvaram konni rojulu nundi undi",
+  ])("maps duration form to onset without inventing facts: %s", text => {
+    const message = { id: randomUUID(), role: "patient" as const, content: text, createdAt: new Date().toISOString() };
+    expect(deterministicIntake([message]).answeredFields).toContain("onset");
   });
 });
