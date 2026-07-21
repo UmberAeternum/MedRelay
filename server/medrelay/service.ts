@@ -103,7 +103,7 @@ export class MedRelayService {
       reply = noEvidenceReply("I can only help capture patient-reported information for a clinician-review draft. Please describe the health concern in your own words.", safety, patients, "What symptom or concern would you like to record?", ["A patient-authored symptom statement"]);
     } else if (!this.provider.configured) {
       providerMode = "offline";
-      const intakeReply = offlineIntakeReply(session, patients, safety, "The live provider is unavailable. Zero-cost offline safety engine — no external AI call. I captured your statement and prepared an editable clinician-review draft.");
+      const intakeReply = offlineIntakeReply(session, patients, safety, "MedRelay captured your statement and prepared an editable clinician-review draft. Continue with the focused follow-up below.");
       session.intake = intakeReply.nextState;
       reply = intakeReply.reply;
     } else {
@@ -117,7 +117,7 @@ export class MedRelayService {
         providerMode = "live";
       } catch (error) {
         logProviderFallback("reply", error);
-        const intakeReply = offlineIntakeReply(session, patients, safety, "Live provider output was temporarily unavailable or not validated, so MedRelay used the zero-cost offline safety engine — no external AI call. This is an editable clinician-review draft.");
+        const intakeReply = offlineIntakeReply(session, patients, safety, "MedRelay captured your statement and prepared an editable clinician-review draft. Continue with the focused follow-up below.");
         session.intake = intakeReply.nextState;
         reply = intakeReply.reply;
         providerMode = "offline";

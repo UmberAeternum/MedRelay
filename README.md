@@ -18,6 +18,8 @@ Open `/medrelay`. The public demo is a zero-cost deterministic intake engine: `M
 
 The optional OpenAI Responses API integration is server-only and requires authorized quota plus explicit `MEDRELAY_LIVE_PROVIDER=true`. Live inference is not enabled or claimed in the public demo. A deterministic response must never be described as GPT-5.6 output, and `OPENAI_API_KEY` must never be exposed to the browser.
 
+Public demo uses MedRelay’s deterministic safety engine. Optional OpenAI Responses API integration is disabled in this zero-cost deployment.
+
 Submission wording: MedRelay is a zero-cost safety-focused demo with validated deterministic fallback behavior. GPT-5.6 integration is implemented but live inference is disabled because no API quota is available.
 
 See `DEPLOYMENT.md`, `SAFETY.md`, and `VERIFICATION_REPORT.md`.

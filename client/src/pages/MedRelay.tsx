@@ -15,7 +15,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -69,15 +68,12 @@ const listFields: Array<[keyof Draft, string]> = [
   ["questionsForClinician", "Questions for clinician"],
 ];
 
-function providerLabel(mode: "live" | "offline" | "deterministic" | null, configured: boolean | undefined) {
-  if (mode === "live") return "Provider: validated live response";
-  if (mode === "deterministic") return "Provider: deterministic safety response";
-  if (mode === "offline") return "Zero-cost offline safety engine — no external AI call";
-  return configured ? "Optional live provider configured — explicit opt-in only" : "Zero-cost offline safety engine — no external AI call";
+function providerLabel(mode: "live" | "offline" | "deterministic" | null) {
+  if (mode === "live") return "Validated response received";
+  return "Editable draft mode";
 }
 
 export default function MedRelay() {
-  const status = trpc.medrelay.status.useQuery();
   const start = trpc.medrelay.start.useMutation();
   const send = trpc.medrelay.continue.useMutation();
   const handoff = trpc.medrelay.handoff.useMutation();
@@ -151,18 +147,19 @@ export default function MedRelay() {
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [turns.length]);
-  const statusText = useMemo(() => providerLabel(mode, status.data?.configured), [mode, status.data?.configured]);
+  const statusText = providerLabel(mode);
 
   return (
     <main className="min-h-screen bg-[var(--med-bg)] text-slate-100">
       <header className="border-b border-white/10">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4">
           <Link href="/" className="font-bold">Med<span className="text-cyan-300">Relay</span></Link>
-          <div className="rounded-full border border-amber-300/30 bg-amber-300/10 px-3 py-1 text-xs font-semibold text-amber-100">Demo - synthetic data only</div>
+          <div className="rounded-full border border-amber-300/30 bg-amber-300/10 px-3 py-1 text-xs font-semibold text-amber-100">Demo — synthetic data only</div>
         </div>
       </header>
       <div className="mx-auto max-w-7xl px-4 py-6">
         <div aria-live="polite" role="status" className="mb-5 flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-full bg-emerald-300/15 px-3 py-1 text-emerald-100">Safety engine active</span>
           <span className="rounded-full bg-cyan-300/15 px-3 py-1 text-cyan-100">{statusText}</span>
           <span className="text-slate-500">Ephemeral session - no permanent demo storage</span>
         </div>
@@ -179,7 +176,10 @@ export default function MedRelay() {
           </section>
           <HandoffPanel draft={draft} state={state} busy={busy} onCreate={makeHandoff} onReset={reset} onSave={saveDraft} onNotice={onNotice} onEvidenceSelect={highlightEvidence} />
         </div>
-        <p className="mx-auto mt-6 max-w-3xl text-center text-xs text-slate-500">Every output is an editable clinician-review draft, not a diagnosis, prescription, or treatment plan. It does not claim clinician review has already happened.</p>
+        <footer className="mx-auto mt-6 max-w-3xl space-y-2 text-center text-xs text-slate-500">
+          <p>Every output is an editable clinician-review draft, not a diagnosis, prescription, or treatment plan. It does not claim clinician review has already happened.</p>
+          <p>Public demo uses MedRelay’s deterministic safety engine. Optional OpenAI Responses API integration is disabled in this zero-cost deployment.</p>
+        </footer>
       </div>
     </main>
   );
