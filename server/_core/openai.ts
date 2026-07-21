@@ -25,7 +25,8 @@ function trustedInput(messages: PatientMessage[]) {
 
 export class OpenAIMedRelayProvider implements ModelProvider {
   readonly model = process.env.OPENAI_MEDICAL_MODEL?.trim() || "gpt-5.6";
-  readonly configured = Boolean(process.env.OPENAI_API_KEY?.trim());
+  // Live inference is an explicit opt-in; the public demo stays offline by default.
+  readonly configured = process.env.MEDRELAY_LIVE_PROVIDER?.trim().toLowerCase() === "true" && Boolean(process.env.OPENAI_API_KEY?.trim());
   private readonly secret = this.configured ? salt() : null;
   // A single retry can multiply a user action into several paid requests. Any
   // transient failure is handled by the service's deterministic offline path.
